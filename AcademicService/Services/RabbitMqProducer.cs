@@ -42,10 +42,7 @@ namespace AcademicService.Services
                     Headers = new Dictionary<string, object?>()
                 };
 
-                if (Activity.Current != null)
-                {
-                    properties.Headers["traceparent"] = Encoding.UTF8.GetBytes(Activity.Current.Id ?? "");
-                }
+                properties.InjectTraceContext();
 
                 await channel.BasicPublishAsync(
                     exchange: exchangeName,
