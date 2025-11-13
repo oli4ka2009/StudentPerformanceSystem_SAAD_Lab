@@ -1,0 +1,15 @@
+﻿{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "ApiGateway": { // Назва профілю може бути іншою
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false, // Нам не потрібен Swagger для шлюзу
+      "applicationUrl": "http://localhost:7000", // <-- ОСЬ ГОЛОВНЕ
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+    // ... (видаліть профіль https, якщо він є, для спрощення)
+  }
+}

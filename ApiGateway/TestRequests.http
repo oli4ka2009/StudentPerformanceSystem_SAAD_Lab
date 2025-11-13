@@ -1,0 +1,19 @@
+### 1. Тест Хореографії (через Шлюз)
+POST http://localhost:7000/api/grades/choreography
+Content-Type: application/json
+
+{
+  "studentName": "Студент Через-Шлюз",
+  "subject": "Хореографія",
+  "grade": 99
+}
+
+### 2. Тест Оркестрації (через Шлюз)
+POST http://localhost:7000/api/grades/orchestration
+Content-Type: application/json
+
+{
+  "studentName": "Студент Через-Шлюз",
+  "subject": "Оркестрація",
+  "grade": 88
+}
