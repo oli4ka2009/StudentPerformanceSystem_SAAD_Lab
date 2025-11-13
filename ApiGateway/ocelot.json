@@ -1,6 +1,5 @@
 {
   "Routes": [
-    // Маршрут 1: Все, що стосується "оцінок", відправляємо на AcademicService
     {
       "UpstreamPathTemplate": "/api/grades/{everything}",
       "UpstreamHttpMethod": [ "POST", "GET", "PUT", "DELETE" ],
@@ -9,13 +8,12 @@
       "DownstreamHostAndPorts": [
         {
           "Host": "localhost",
-          "Port": 5144 // TODO: Перевірте, чи це HTTP-порт AcademicService
+          "Port": 5144
         }
       ]
     }
-    // TODO: Пізніше ми додамо сюди маршрут для UserService (для логіна)
   ],
   "GlobalConfiguration": {
-    "BaseUrl": "http://localhost:7000" // Адреса, на якій буде працювати сам шлюз
+    "BaseUrl": "http://localhost:7000"
   }
 }

@@ -1,38 +1,11 @@
-﻿using Ocelot.DependencyInjection;
-using Ocelot.Middleware;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
+﻿using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Увімкніть детальне логування
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-builder.Logging.SetMinimumLevel(LogLevel.Debug);
-
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracerProviderBuilder =>
-    {
-        tracerProviderBuilder
-            .SetResourceBuilder(
-                ResourceBuilder.CreateDefault()
-                    .AddService(serviceName: "ApiGateway", serviceVersion: "1.0.0"))
-            .AddAspNetCoreInstrumentation(options =>
-            {
-                options.RecordException = true;
-            })
-            .AddHttpClientInstrumentation()
-            .AddConsoleExporter() // Побачите трейси в консолі
-            .AddOtlpExporter(options =>
-            {
-                options.Endpoint = new Uri("http://localhost:4317");
-                options.Protocol = OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
-            });
-
-        Console.WriteLine("✅ OpenTelemetry tracing configured for ApiGateway");
-    });
+builder.Services.AddCustomOpenTelemetry("ApiGateway");
 
 builder.Configuration.AddJsonFile("ocelot.json", optional: false, reloadOnChange: true);
+
 builder.Services.AddOcelot(builder.Configuration);
 
 builder.Services.AddCors(options =>
@@ -47,13 +20,28 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
-
-Console.WriteLine("🚀 API Gateway starting...");
-
 app.UseCors("AllowAngularApp");
 
+app.Use(async (context, next) =>
+{
+    var activitySource = context.RequestServices.GetRequiredService<ActivitySource>();
+    using (var activity = activitySource.StartActivity("ApiGateway-Request", ActivityKind.Server))
+    {
+        activity?.SetTag("http.method", context.Request.Method);
+        activity?.SetTag("http.path", context.Request.Path);
+        try
+        {
+            await next(context);
+            activity?.SetTag("http.status_code", context.Response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            activity?.RecordException(ex);
+            throw;
+        }
+    }
+});
+
 await app.UseOcelot();
-
-Console.WriteLine($"🌐 API Gateway listening on: {string.Join(", ", builder.WebHost.GetSetting("urls")?.Split(';') ?? new[] { "not configured" })}");
-
 app.Run();

@@ -1,8 +1,4 @@
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
-using SharedModels;
-using System.Text;
-using System.Text.Json;
+п»їusing OpenTelemetry.Trace;
 
 namespace NotificationService
 {
@@ -10,31 +6,33 @@ namespace NotificationService
     {
         private readonly ILogger<Worker> _logger;
         private readonly IConfiguration _configuration;
-        private IConnection _connection;
-        private IChannel _channel;
+        private readonly ActivitySource _activitySource;
+        private IConnection? _connection;
+        private IChannel? _channel;
 
-        public Worker(ILogger<Worker> logger, IConfiguration configuration)
+        public Worker(ILogger<Worker> logger, IConfiguration configuration, ActivitySource activitySource)
         {
             _logger = logger;
             _configuration = configuration;
+            _activitySource = activitySource;
 
             try
             {
                 var hostName = _configuration["RabbitMq:HostName"];
                 if (string.IsNullOrEmpty(hostName))
                 {
-                    throw new InvalidOperationException("RabbitMq:HostName не знайдено в конфігурації.");
+                    throw new InvalidOperationException("RabbitMq:HostName РЅРµ Р·РЅР°Р№РґРµРЅРѕ.");
                 }
 
                 var factory = new ConnectionFactory() { HostName = hostName };
                 _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
                 _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
 
-                _logger.LogInformation("NotificationService: Успішно підключено до RabbitMQ.");
+                _logger.LogInformation("NotificationService: РЈСЃРїС–С€РЅРѕ РїС–РґРєР»СЋС‡РµРЅРѕ РґРѕ RabbitMQ.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "NotificationService: Не вдалося підключитися до RabbitMQ.");
+                _logger.LogError(ex, "NotificationService: РќРµ РІРґР°Р»РѕСЃСЏ РїС–РґРєР»СЋС‡РёС‚РёСЃСЏ РґРѕ RabbitMQ.");
             }
         }
 
@@ -42,7 +40,7 @@ namespace NotificationService
         {
             if (_channel == null)
             {
-                _logger.LogError("RabbitMQ канал не ініціалізовано. Worker не може запуститися.");
+                _logger.LogError("RabbitMQ РєР°РЅР°Р» РЅРµ С–РЅС–С†С–Р°Р»С–Р·РѕРІР°РЅРѕ. Worker РЅРµ РјРѕР¶Рµ Р·Р°РїСѓСЃС‚РёС‚РёСЃСЏ.");
                 return;
             }
 
@@ -60,48 +58,78 @@ namespace NotificationService
                 exchange: "grades_exchange",
                 routingKey: bindingKey);
 
-            _logger.LogInformation($"[LOG] Черга '{queueName}' прив'язана до 'grades_exchange' з ключем '{bindingKey}'.");
-            _logger.LogInformation("[*] Очікування на нові оцінки...");
+            _logger.LogInformation($"[LOG] Р§РµСЂРіР° '{queueName}' РїСЂРёРІ'СЏР·Р°РЅР° РґРѕ 'grades_exchange' Р· РєР»СЋС‡РµРј '{bindingKey}'.");
+            _logger.LogInformation("[*] РћС‡С–РєСѓРІР°РЅРЅСЏ РЅР° РЅРѕРІС– РѕС†С–РЅРєРё...");
 
-            // ВИПРАВЛЕННЯ: Використовуємо AsyncEventingBasicConsumer замість EventingBasicConsumer
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
-            // ВИПРАВЛЕННЯ: Обробник тепер асинхронний (async)
+            // рџ”Ґ ReceivedAsync Р·Р°РјС–СЃС‚СЊ Received, РѕР±СЂРѕР±РЅРёРє Р°СЃРёРЅС…СЂРѕРЅРЅРёР№
             consumer.ReceivedAsync += async (model, ea) =>
             {
                 try
                 {
+                    ActivityContext parentContext = default;
+                    if (ea.BasicProperties?.Headers?.TryGetValue("traceparent", out var tp) == true)
+                    {
+                        var traceParent = Encoding.UTF8.GetString((byte[])tp);
+                        parentContext = ActivityContext.Parse(traceParent, null);
+                    }
+
+                    using var activity = _activitySource.StartActivity(
+                        "Process Grade Notification",
+                        ActivityKind.Consumer,
+                        parentContext);
+
+                    if (activity != null)
+                    {
+                        activity.SetTag("messaging.system", "rabbitmq");
+                        _logger.LogInformation($"[TRACE] Activity СЃС‚РІРѕСЂРµРЅРѕ: {activity.Id}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("[TRACE] Activity РќР• СЃС‚РІРѕСЂРµРЅРѕ!");
+                    }
+
                     var body = ea.Body.ToArray();
                     var message = Encoding.UTF8.GetString(body);
                     var routingKey = ea.RoutingKey;
 
-                    _logger.LogInformation($"\n[LOG] Отримано повідомлення з ключем '{routingKey}'.");
+                    _logger.LogInformation($"\n[LOG] РћС‚СЂРёРјР°РЅРѕ РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ Р· РєР»СЋС‡РµРј '{routingKey}'.");
 
+                    // Р”РµСЃРµСЂС–Р°Р»С–Р·СѓС”РјРѕ РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ
                     var gradeEvent = JsonSerializer.Deserialize<GradeEvent>(message);
 
-                    string processedData = $"Студент '{gradeEvent.StudentName}' отримав '{gradeEvent.Grade}' з предмету '{gradeEvent.Subject}'.";
-                    _logger.LogInformation($"   => Оброблено: {processedData}");
+                    string processedData = $"РЎС‚СѓРґРµРЅС‚ '{gradeEvent?.StudentName}' РѕС‚СЂРёРјР°РІ '{gradeEvent?.Grade}' Р· РїСЂРµРґРјРµС‚Сѓ '{gradeEvent?.Subject}'.";
+                    _logger.LogInformation($" => РћР±СЂРѕР±Р»РµРЅРѕ: {processedData}");
+                    _logger.LogInformation($" [NOTIFY] Email-СЃРїРѕРІС–С‰РµРЅРЅСЏ РЅР°РґС–СЃР»Р°РЅРѕ РґР»СЏ {gradeEvent?.StudentName}");
 
-                    _logger.LogInformation($"   [NOTIFY] Email-сповіщення надіслано для {gradeEvent.StudentName}");
+                    // рџ”Ґ Р’РђР–Р›РР’Рћ! Р’РёРєРѕСЂРёСЃС‚РѕРІСѓС”РјРѕ await РґР»СЏ Р°СЃРёРЅС…СЂРѕРЅРЅРѕРіРѕ РїС–РґС‚РІРµСЂРґР¶РµРЅРЅСЏ
+                    await _channel.BasicAckAsync(ea.DeliveryTag, multiple: false);
                 }
                 catch (JsonException jsonEx)
                 {
-                    _logger.LogError(jsonEx, "[ERROR] Не вдалося десеріалізувати повідомлення.");
+                    _logger.LogError(jsonEx, "[ERROR] РќРµ РІРґР°Р»РѕСЃСЏ РґРµСЃРµСЂС–Р°Р»С–Р·СѓРІР°С‚Рё РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ.");
+
+                    // РџРѕРІС–РґРѕРјР»СЏС”РјРѕ RabbitMQ РїСЂРѕ РїРѕРјРёР»РєСѓ (РЅРµ РїРѕРІРµСЂС‚Р°С”РјРѕ РІ С‡РµСЂРіСѓ)
+                    await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "[ERROR] Помилка при обробці повідомлення.");
-                }
+                    _logger.LogError(ex, "[ERROR] вќЊ РџРѕРјРёР»РєР° РїСЂРё РѕР±СЂРѕР±С†С– РїРѕРІС–РґРѕРјР»РµРЅРЅСЏ.");
 
-                // Важливо повернути Task
-                await Task.CompletedTask;
+                    // РџРѕРІС–РґРѕРјР»СЏС”РјРѕ RabbitMQ РїСЂРѕ РїРѕРјРёР»РєСѓ (РїРѕРІРµСЂС‚Р°С”РјРѕ РІ С‡РµСЂРіСѓ РґР»СЏ РїРѕРІС‚РѕСЂРЅРѕС— СЃРїСЂРѕР±Рё)
+                    await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: true);
+                }
             };
 
             await _channel.BasicConsumeAsync(
                 queue: queueName,
-                autoAck: true,
+                autoAck: false, // Р СѓС‡РЅРµ РїС–РґС‚РІРµСЂРґР¶РµРЅРЅСЏ РґР»СЏ РЅР°РґС–Р№РЅРѕСЃС‚С–
                 consumer: consumer);
 
+            _logger.LogInformation("Consumer Р°РєС‚РёРІРЅРёР№, РѕС‡С–РєСѓРІР°РЅРЅСЏ РїРѕРІС–РґРѕРјР»РµРЅСЊ...");
+
+            // РўСЂРёРјР°С”РјРѕ Worker Р¶РёРІРёРј
             while (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(1000, stoppingToken);
@@ -110,9 +138,19 @@ namespace NotificationService
 
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            if (_channel != null) await _channel.CloseAsync();
-            if (_connection != null) await _connection.CloseAsync();
-            _logger.LogInformation("NotificationService зупинено.");
+            if (_channel != null)
+            {
+                await _channel.CloseAsync();
+                _logger.LogInformation("RabbitMQ Channel Р·Р°РєСЂРёС‚Рѕ.");
+            }
+
+            if (_connection != null)
+            {
+                await _connection.CloseAsync();
+                _logger.LogInformation("RabbitMQ Connection Р·Р°РєСЂРёС‚Рѕ.");
+            }
+
+            _logger.LogInformation("NotificationService Р·СѓРїРёРЅРµРЅРѕ.");
             await base.StopAsync(cancellationToken);
         }
     }

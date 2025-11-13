@@ -1,0 +1,9 @@
+﻿global using System.Diagnostics;
+global using System.Text;
+global using System.Text.Json;
+global using Microsoft.AspNetCore.Builder;
+global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Hosting;
+global using RabbitMQ.Client;
+global using SharedModels;

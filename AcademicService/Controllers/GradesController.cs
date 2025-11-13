@@ -1,6 +1,4 @@
 ﻿using AcademicService.Services;
-using Microsoft.AspNetCore.Mvc;
-using SharedModels;
 
 namespace AcademicService.Controllers
 {
@@ -56,53 +54,32 @@ namespace AcademicService.Controllers
 
             _logger.LogInformation($"Прийнято запит на оцінку (Оркестрація) для {gradeEvent.StudentName}.");
 
-            // КРОК 1: (Симуляція) Збереження в локальну базу
-            // ... уявимо, що ми зберегли оцінку в AcademicDB ...
             gradeEvent.Timestamp = DateTime.UtcNow;
-            _logger.LogInformation("   => Крок 1: Оцінку 'збережено' в локальну БД.");
 
-
-            // КРОК 2: Прямий виклик NotificationService
             try
             {
-                _logger.LogInformation("   => Крок 2: Здійснення прямого HTTP-дзвінка до NotificationService...");
+                _logger.LogInformation("   => Крок 1: Здійснення прямого HTTP-дзвінка до NotificationService...");
 
-                // Створюємо клієнт
                 var httpClient = _httpClientFactory.CreateClient();
 
-                // ВАЖЛИВО: "http://localhost:XXXX" - це адреса, на якій запуститься
-                // ваш NotificationService. Вам потрібно буде подивитися її в консолі
-                // і, можливо, змінити цей порт.
-                // Ми використовуємо "http", а не "https", щоб спростити тест.
-                // Перевірте файл /Properties/launchSettings.json у NotificationService
-
-                // TODO: Замініть порт 7001 на реальний порт вашого NotificationService
                 var notificationServiceUrl = "http://localhost:5000/api/notify";
 
-                // Здійснюємо POST-запит і ЧЕКАЄМО на відповідь
                 var response = await httpClient.PostAsJsonAsync(notificationServiceUrl, gradeEvent);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    _logger.LogInformation("   => Крок 3: NotificationService відповів успіхом.");
+                    _logger.LogInformation("   => Крок 2: NotificationService відповів успіхом.");
                 }
                 else
                 {
-                    // Якщо сервіс сповіщень "впав", ми дізнаємося про це тут
-                    _logger.LogWarning($"   => Крок 3: NotificationService відповів помилкою: {response.StatusCode}");
-                    // У реальному житті тут може бути логіка компенсації
+                    _logger.LogWarning($"   => Крок 2: NotificationService відповів помилкою: {response.StatusCode}");
                 }
             }
             catch (Exception ex)
             {
-                // Якщо NotificationService взагалі не запущений, ми потрапимо сюди
-                _logger.LogError(ex, "   => Крок 3: Не вдалося зв'язатися з NotificationService.");
-                // Ми все одно повертаємо успіх, оскільки оцінку ЗБЕРЕЖЕНО.
-                // Але логуємо, що сповіщення не надіслано.
+                _logger.LogError(ex, "   => Крок 2: Не вдалося зв'язатися з NotificationService.");
             }
 
-            // КРОК 4: Повертаємо відповідь клієнту
-            // Ми повертаємо 201 Created, оскільки головна робота (збереження) виконана.
             _logger.LogInformation("   => Крок 4: Повернення відповіді клієнту.");
             return CreatedAtAction(nameof(AddGradeOrchestrated), gradeEvent);
         }
