@@ -6,6 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCustomOpenTelemetry("AcademicService");
 
 builder.Services.AddControllers();
+builder.Services.AddSingleton(new ActivitySource("AcademicService"));
 builder.Services.AddSingleton<IConnectionFactory>(_ => new ConnectionFactory
 {
     HostName = builder.Configuration["RabbitMq:HostName"]

@@ -15,6 +15,32 @@ public static class RabbitMqTracingExtensions
         }
     }
 
+    public static Activity? StartPublishActivity(
+        this ActivitySource activitySource,
+        string exchangeName,
+        string routingKey,
+        int? messageSize = null)
+    {
+        var activity = activitySource.StartActivity(
+            "RabbitMQ Publish",
+            ActivityKind.Producer);
+
+        if (activity != null)
+        {
+            activity.SetTag("messaging.system", "rabbitmq");
+            activity.SetTag("messaging.destination", exchangeName);
+            activity.SetTag("messaging.routing_key", routingKey);
+            activity.SetTag("messaging.operation", "publish");
+
+            if (messageSize.HasValue)
+            {
+                activity.SetTag("messaging.message_payload_size_bytes", messageSize.Value);
+            }
+        }
+
+        return activity;
+    }
+
     public static Activity? StartActivityFromMessage(
         this ActivitySource activitySource,
         string activityName,
@@ -53,5 +79,10 @@ public static class RabbitMqTracingExtensions
             activity.SetStatus(ActivityStatusCode.Error, exception.Message);
             activity.RecordException(exception);
         }
+    }
+
+    public static void SetSuccess(this Activity? activity)
+    {
+        activity?.SetStatus(ActivityStatusCode.Ok);
     }
 }

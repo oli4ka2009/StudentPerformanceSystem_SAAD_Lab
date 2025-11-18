@@ -7,6 +7,7 @@ namespace AcademicService.Services
     {
         private readonly IConnection _connection;
         private readonly ILogger<RabbitMqProducer> _logger;
+        private readonly ActivitySource _activitySource;
 
         private static readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
         {
@@ -15,10 +16,12 @@ namespace AcademicService.Services
 
         public RabbitMqProducer(
             IConnection connection,
-            ILogger<RabbitMqProducer> logger)
+            ILogger<RabbitMqProducer> logger,
+            ActivitySource activitySource)
         {
             _connection = connection;
             _logger = logger;
+            _activitySource = activitySource;
         }
 
         public async Task PublishMessageAsync<T>(T message, string exchangeName, string routingKey)
@@ -36,6 +39,11 @@ namespace AcademicService.Services
                 string messageBody = JsonSerializer.Serialize(message, _jsonOptions);
                 var body = Encoding.UTF8.GetBytes(messageBody);
 
+                using var activity = _activitySource.StartPublishActivity(
+                    exchangeName,
+                    routingKey,
+                    body.Length);
+
                 var properties = new BasicProperties
                 {
                     Persistent = true,
@@ -50,6 +58,8 @@ namespace AcademicService.Services
                     mandatory: false,
                     basicProperties: properties,
                     body: body);
+
+                activity.SetSuccess();
 
                 _logger.LogInformation(
                     $"[RabbitMQ] Надіслано в '{exchangeName}' (ключ: '{routingKey}'): {messageBody}");
